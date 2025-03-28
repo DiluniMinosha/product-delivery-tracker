@@ -1,8 +1,15 @@
-import type { NextConfig } from "next";
+/** @type {import('next').NextConfig} */
+const path = require('path')
 
-const nextConfig: NextConfig = {
-  /* config options here */
+const nextConfig = {
   reactStrictMode: true,
-};
+  typescript: {
+    ignoreBuildErrors: false
+  },
+  webpack: (config) => {
+    config.resolve.alias['@'] = path.join(__dirname, 'src')
+    return config
+  }
+}
 
-export default nextConfig;
+module.exports = nextConfig

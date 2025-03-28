@@ -1,46 +1,79 @@
-from fastapi import FastAPI
-from pydantic import BaseModel
-from typing import List, Optional
-from enum import Enum
-from datetime import datetime
-import uuid
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from models import CarrierType, ShipmentStatus
+from schemas import ShipmentCreate, ShipmentResponse
+from utils import shipment_manager
 
-app = FastAPI(title="Product Delivery Status Tracker")
+app = FastAPI(title="Product Delivery Tracker")
 
-# Carrier Enum
-class CarrierType(str):
-    FEDEX = "FedEx"
-    DHL = "DHL"
+# CORS Configuration
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allows all origins
+    allow_credentials=True,
+    allow_methods=["*"],  # Allows all methods
+    allow_headers=["*"],  # Allows all headers
+)
 
-# Shipment Status Enum
-class ShipmentStatus(str):
-    PENDING = "Pending"
-    IN_TRANSIT = "In Transit"
-    DELIVERED = "Delivered"
-    DELAYED = "Delayed"
-    FAILED = "Failed"
+@app.post("/shipments", response_model=ShipmentResponse)
+async def create_shipment(shipment: ShipmentCreate):
+    new_shipment = shipment_manager.create_shipment(shipment)
+    shipment_manager.simulate_carrier_status_update()
+    return ShipmentResponse(
+        id=new_shipment.id,
+        tracking_number=new_shipment.tracking_number,
+        carrier=new_shipment.carrier,
+        sender_name=new_shipment.sender_name,
+        recipient_name=new_shipment.recipient_name,
+        status=new_shipment.status,
+        created_at=new_shipment.created_at
+    )
 
-# Shipment Model
-class Shipment(BaseModel):
-    id: str = str(uuid.uuid4())
-    tracking_number: str
-    carrier: CarrierType
-    status: ShipmentStatus = ShipmentStatus.PENDING
-    created_at: datetime = datetime.utcnow()
-    sender_name: str
-    recipient_name: str
-    weight: float
-    destination: str
+@app.get("/shipments", response_model=list[ShipmentResponse])
+async def list_shipments(limit: int = 10):
+    shipments = shipment_manager.get_shipments(limit)
+    return [
+        ShipmentResponse(
+            id=shipment.id,
+            tracking_number=shipment.tracking_number,
+            carrier=shipment.carrier,
+            sender_name=shipment.sender_name,
+            recipient_name=shipment.recipient_name,
+            status=shipment.status,
+            created_at=shipment.created_at
+        ) for shipment in shipments
+    ]
 
-# In-memory storage
-shipments_db: List[Shipment] = []
+@app.get("/shipments/{shipment_id}", response_model=ShipmentResponse)
+async def get_shipment(shipment_id: str):
+    shipment = shipment_manager.get_shipment_by_id(shipment_id)
+    if not shipment:
+        raise HTTPException(status_code=404, detail="Shipment not found")
+    return ShipmentResponse(
+        id=shipment.id,
+        tracking_number=shipment.tracking_number,
+        carrier=shipment.carrier,
+        sender_name=shipment.sender_name,
+        recipient_name=shipment.recipient_name,
+        status=shipment.status,
+        created_at=shipment.created_at
+    )
 
-# Basic API Endpoints
-@app.post("/shipments")
-def create_shipment(shipment: Shipment):
-    shipments_db.append(shipment)
-    return shipment
+@app.put("/shipments/{shipment_id}/status")
+async def update_shipment_status(shipment_id: str, status: ShipmentStatus):
+    updated_shipment = shipment_manager.update_shipment_status(shipment_id, status)
+    if not updated_shipment:
+        raise HTTPException(status_code=404, detail="Shipment not found")
+    return {"status": "updated"}
 
-@app.get("/shipments")
-def list_shipments():
-    return shipments_db[:10]  # Limit to 10 recent shipments
+@app.get("/carriers")
+async def list_carriers():
+    return [carrier.value for carrier in CarrierType]
+
+@app.get("/metrics")
+async def get_metrics():
+    return shipment_manager.get_carrier_metrics()
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
